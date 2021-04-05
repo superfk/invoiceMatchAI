@@ -20,6 +20,9 @@ import sys
 import csv
 from time import time
 
+config = tf.compat.v1.ConfigProto(gpu_options=tf.compat.v1.GPUOptions(allow_growth=True))
+sess = tf.compat.v1.Session(config=config)
+
 #bDataAugumentUsed = False
 g_history = None
 
@@ -27,9 +30,10 @@ g_history = None
 image_size = 40
 
 def prepare():
+    global image_size
     # Model / data parameters
     num_classes = 10
-    input_shape = (28, 28, 1)
+    input_shape = (image_size, image_size, 1)
 
     # the data, split between train and test sets
     (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
@@ -92,14 +96,18 @@ def predict(model, img_path):
     global image_size
     img = keras.preprocessing.image.load_img(img_path, target_size=(image_size, image_size),  color_mode="rgb")
     x = keras.preprocessing.image.img_to_array(img)
+    # x = x.astype("float32") / 255
     x = np.expand_dims(x, axis=0)
     x = keras.applications.imagenet_utils.preprocess_input(x, mode="tf")
-    predict = np.argmax(model.predict(x), axis=-1)
+    prediction = model.predict(x)
+    predict = np.argmax(prediction, axis=-1)
     class_names = glob.glob(r"C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI\data\train\*") # Reads all the folders in which images are present
     class_names = sorted(class_names) # Sorting them
     name_id_map = dict(zip(class_names, range(len(class_names))))
-    print(name_id_map)
-    print('Prediction:', predict)
+    predict_label = [os.path.split(k)[-1] for k, v in name_id_map.items() if v == predict[0] ]
+    # print('Prediction:', prediction)
+    print('MAX POSSIBILITY:', predict)
+    print('Prediction label:', predict_label)
 
 #create preview folder if not exists
 def create_folder(directory):
@@ -159,7 +167,7 @@ class TrainHistory(keras.callbacks.Callback):
 
 def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32, 
   bDataAugumentUsed = None, train_batchsize = None, val_batchsize = None):
-  global g_history
+  global g_history, image_size
   start_time = time()
 
   #base_dir = 'Data'
@@ -256,10 +264,10 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
   train_aug_datagen = ImageDataGenerator(
       rescale=1./255,
       rotation_range=20,
-      # width_shift_range=0.2,
-      # height_shift_range=0.2,
-      # zoom_range=[-0.2,0.2],
-      # horizontal_flip=False,
+      width_shift_range=10,
+      height_shift_range=10,
+      zoom_range=0.2,
+      horizontal_flip=False,
       fill_mode='nearest')
 
   validation_original_datagen = ImageDataGenerator(rescale=1./255)
@@ -268,9 +276,9 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
   validation_aug_datagen = ImageDataGenerator(
       rescale=1./255,
       rotation_range=20,
-      width_shift_range=0.2,
-      height_shift_range=0.2,
-      # zoom_range=[-0.2,0.2],
+      width_shift_range=10,
+      height_shift_range=10,
+      zoom_range=0.2,
       horizontal_flip=False,
       fill_mode='nearest')
 
@@ -286,8 +294,6 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
         save_to_dir=create_folder(r'D:/LogData/invoice/train original preview'),
         save_format='jpeg'
         )
-  label_map = (train_original_datagen.class_indices)
-  print(f"label_map: {label_map}")
   #define generator flow_from_directory method for data augmentation images
   train_aug_generator = train_aug_datagen.flow_from_directory(
         train_dir,
@@ -373,17 +379,81 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
   model.save(szModelPath + '.h5')
   return model
 
+def VGG16_training2(model_path, input_path, epoch = 30, batch_size = 32, 
+  bDataAugumentUsed = None, train_batchsize = None, val_batchsize = None):
+  global g_history
+  
+  model, x_train, y_train = prepare()
+  
+  '''
+  keras.applications.vgg16.VGG16(include_top=True, weights='imagenet', input_tensor=None, input_shape=None, pooling=None, classes=1000)
+
+  - input_shape: optional shape tuple, only to be specified if include_top is False 
+    (otherwise the input shape has to be (224, 224, 3) (with 'channels_last' data format) or (3, 224, 224) 
+    (with 'channels_first' data format). It should have exactly 3 inputs channels, and width and height should be no smaller than 32. E.g. (200, 200, 3) 
+    would be one valid value.
+
+  - include_top: whether to include the 3 fully-connected layers at the top of the network.
+
+  - pooling: Optional pooling mode for feature extraction when include_top is False.
+    None means that the output of the model will be the 4D tensor output of the last convolutional layer.
+    'avg' means that global average pooling will be applied to the output of the last convolutional layer, and thus the output of the model will be a 2D tensor.
+    'max' means that global max pooling will be applied.
+  '''
+  vgg_conv = VGG16(weights='imagenet', include_top=False, 
+    input_shape=(image_size, image_size, 3))
+  # Freeze the layers except the last 4 layers
+  for layer in vgg_conv.layers[:-4]:
+      layer.trainable = False
+      #print(layer.get_config())
+  print("Vgg16 model summary:")
+  vgg_conv.summary()
+
+  #Create new Model
+  model = models.Sequential()
+
+  #Add the vgg convolutional base model
+  model.add(vgg_conv)
+
+  #Get shape for VGG16
+  x = vgg_conv.get_layer("block5_pool").output.shape[1]
+  y = vgg_conv.get_layer("block5_pool").output.shape[2]
+  c = vgg_conv.get_layer("block5_pool").output.shape[3]
+
+  # Add new layers
+  model.add(layers.Flatten(input_shape=vgg_conv.output_shape[1:]))
+  model.add(layers.Dense(256, activation='relu', input_dim = x*y*c))
+  model.add(layers.Dropout(0.5))
+  model.add(layers.Dense(7, activation='sigmoid'))
+
+  #Compile the model
+  model.compile(optimizer=optimizers.RMSprop(lr=0.00001), loss='categorical_crossentropy', metrics=['acc'])
+  model.summary()
+  
+  model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["accuracy"])
+  model.fit(x_train, y_train, batch_size=batch_size, epochs=epoch, validation_split=0.1)
+
+  # Save Model
+  json_string = model.to_json()
+  szModelPath = os.path.splitext(model_path)[0]
+  json_pathfilename = szModelPath + '.json'
+  open(json_pathfilename, 'w').write(json_string)              #'Models/uuvgg16_keras.json'
+  #model.save_weights(model_path)                               #'Models/uuvgg16_keras.hdf'
+  model.save(szModelPath + '.h5')
+  return model
+
+
 if __name__=='__main__':
     # model, x_train, y_train = prepare()
-    # model = train(model, x_train, y_train, epochs=10)
+    # model = train(model, x_train, y_train, epochs=30)
     # evaluate(model)
     # save_model(model)
 
     # model_path = r"C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI\CNN_Mnist.h5"
     # input_path = r"C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI"
-    # model = VGG16_training(model_path, input_path, epoch = 300, batch_size = 5 ,bDataAugumentUsed = True, train_batchsize = 20, val_batchsize = 20)
+    # model = VGG16_training(model_path, input_path, epoch = 500, batch_size = 60 ,bDataAugumentUsed = True, train_batchsize = 10, val_batchsize = 10)
 
     model = load_model()
-    images = glob.glob(r'C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI\data\train\8\*.jpg')
+    images = glob.glob(r'C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI\data\validation\0\*.jpg')
     for imgPath in images:
         predict(model, f'{imgPath}')
