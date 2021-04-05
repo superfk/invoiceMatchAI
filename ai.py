@@ -5,6 +5,7 @@ import tensorflow as tf
 import os, glob
 
 import keras
+from keras.applications.imagenet_utils import *
 from keras.applications import VGG16
 from keras.callbacks import CSVLogger
 from keras.callbacks import EarlyStopping
@@ -23,7 +24,7 @@ from time import time
 g_history = None
 
 #resize image
-image_size = 64
+image_size = 40
 
 def prepare():
     # Model / data parameters
@@ -88,12 +89,16 @@ def evaluate(model):
     print("Test accuracy:", score[1])
 
 def predict(model, img_path):
-    image_size = (28, 28)
-    img = keras.preprocessing.image.load_img(img_path, target_size=image_size,  color_mode="grayscale")
+    global image_size
+    img = keras.preprocessing.image.load_img(img_path, target_size=(image_size, image_size),  color_mode="rgb")
     x = keras.preprocessing.image.img_to_array(img)
     x = np.expand_dims(x, axis=0)
     x = keras.applications.imagenet_utils.preprocess_input(x, mode="tf")
     predict = np.argmax(model.predict(x), axis=-1)
+    class_names = glob.glob(r"C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI\data\train\*") # Reads all the folders in which images are present
+    class_names = sorted(class_names) # Sorting them
+    name_id_map = dict(zip(class_names, range(len(class_names))))
+    print(name_id_map)
     print('Prediction:', predict)
 
 #create preview folder if not exists
@@ -251,10 +256,10 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
   train_aug_datagen = ImageDataGenerator(
       rescale=1./255,
       rotation_range=20,
-      width_shift_range=0.2,
-      height_shift_range=0.2,
-      zoom_range=[-0.2,0.2],
-      horizontal_flip=True,
+      # width_shift_range=0.2,
+      # height_shift_range=0.2,
+      # zoom_range=[-0.2,0.2],
+      # horizontal_flip=False,
       fill_mode='nearest')
 
   validation_original_datagen = ImageDataGenerator(rescale=1./255)
@@ -265,8 +270,8 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
       rotation_range=20,
       width_shift_range=0.2,
       height_shift_range=0.2,
-      zoom_range=[-0.2,0.2],
-      horizontal_flip=True,
+      # zoom_range=[-0.2,0.2],
+      horizontal_flip=False,
       fill_mode='nearest')
 
   #test data keeps the same
@@ -278,16 +283,18 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
         target_size=(image_size, image_size),
         batch_size=batch_size,
         class_mode='categorical',
-        #save_to_dir=create_folder(r'D:/LogData/PCBImage/train original preview'),
+        save_to_dir=create_folder(r'D:/LogData/invoice/train original preview'),
         save_format='jpeg'
         )
+  label_map = (train_original_datagen.class_indices)
+  print(f"label_map: {label_map}")
   #define generator flow_from_directory method for data augmentation images
   train_aug_generator = train_aug_datagen.flow_from_directory(
         train_dir,
         target_size=(image_size, image_size),
         batch_size=train_batchsize,
         class_mode='categorical',
-        #save_to_dir=create_folder(r'D:/LogData/PCBImage/train augmentation preview'),
+        save_to_dir=create_folder(r'D:/LogData/invoice/train augmentation preview'),
         save_format='jpeg'
         )
 
@@ -307,7 +314,7 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
         target_size=(image_size, image_size),
         batch_size=val_batchsize,
         class_mode='categorical',
-        #save_to_dir=create_folder(r'D:/LogData/PCBImage/valid augmentation preview'),
+        save_to_dir=create_folder(r'D:/LogData/invoice/valid augmentation preview'),
         save_format='jpeg',
         shuffle=False) 
 
@@ -343,7 +350,7 @@ def VGG16_training(model_path, input_path, epoch = 30, batch_size = 32,
       validation_data=validation_aug_generator, 
       validation_steps=validation_aug_generator.samples/validation_aug_generator.batch_size, 
       verbose=2,
-      callbacks=[tensorboard,csv_logger,early_stop])
+      callbacks=[])
   else:
       g_history = model.fit_generator(train_original_generator,
       steps_per_epoch=train_original_generator.samples/train_original_generator.batch_size, 
@@ -371,12 +378,12 @@ if __name__=='__main__':
     # model = train(model, x_train, y_train, epochs=10)
     # evaluate(model)
     # save_model(model)
-    model_path = r"D:\03_Coding\Vision\invoiceMatch\CNN_Mnist.h5"
-    input_path = r"D:\03_Coding\Vision\invoiceMatch"
-    model = VGG16_training(model_path, input_path, epoch = 5, batch_size = 10 ,bDataAugumentUsed = True, train_batchsize = 30, val_batchsize = 10)
+
+    # model_path = r"C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI\CNN_Mnist.h5"
+    # input_path = r"C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI"
+    # model = VGG16_training(model_path, input_path, epoch = 300, batch_size = 5 ,bDataAugumentUsed = True, train_batchsize = 20, val_batchsize = 20)
+
     model = load_model()
-    evaluate(model)
-    images = glob.glob('./crop/taxid_7/*.jpg')
+    images = glob.glob(r'C:\Users\shawn\Google Drive\00_BareissHome\10_Coding\invoiceMatchAI\data\train\8\*.jpg')
     for imgPath in images:
-        print(imgPath)
-        predict(model, imgPath)
+        predict(model, f'{imgPath}')
